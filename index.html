@@ -512,7 +512,7 @@ function toggleTema() {
     // =========================================================================
     // SEMUA SOURCE CODE DI BAWAH INI ADALAH ASLI 100% GAK UBAH SAMA SEKALI
     // =========================================================================
-    const scriptURL = 'https://script.google.com/macros/s/AKfycbz4gh_wkvx7TczvDBuQN-cJxxMsOIOAkPRw_i59lJKa6Zr9iYfxFdgSGQg3Ox-pm3uH/exec';
+    const scriptURL = 'https://script.google.com/macros/s/AKfycbzb3ELtW7s2Ybc6lGL6GpfKr7WALLQseoAbAP2h2cBZkujzS9kjLkXWzcPO4MOYwP8/exec';
     const form = document.getElementById('dataForm');
 
     // Mentokin Tanggal (GMT+7)
@@ -613,61 +613,72 @@ function toggleTema() {
 
     function tutupPreview() { document.getElementById('previewModal').style.display = 'none'; }
 	
-// Buku Catatan NPSN Sementara di laptop Dell Baba
-    function prosesKirimData() {
-        const btnFix = document.getElementById('btnKirimFix');
-        const npsnInput = document.getElementById('npsn').value;
-        
-        btnFix.disabled = true; 
-        btnFix.innerText = "Memverifikasi Database...";
-
-        const formData = new FormData(form);
-        const namaLengkap = document.getElementById('selectBentuk').value + " " + document.getElementById('namaLembaga').value;
-        formData.set('nama_lembaga', namaLengkap);
-
-        // KIRIM KE GOOGLE TANPA MODE NO-CORS
-        fetch(scriptURL, { 
-    method: 'POST', 
-    body: formData 
-})
-.then(response => response.text())
-.then(hasil => {
-            const status = hasil.trim();
-            
-            if (status === "DOBEL") {
-                // TAMPILKAN ALERT DAN JANGAN TUTUP MODAL DULU BIAR USER BISA LIHAT
-                alert("❌ DATA DITOLAK!\n\nNPSN " + npsnInput + " sudah pernah menginput data ke Google Sheet.\nSilahkan cek kembali atau hubungi admin.");
-                
-                btnFix.disabled = false;
-                btnFix.innerText = "Data Benar, Lanjut Kirim!";
-                // JANGAN jalankan form.reset() di sini bi
-            } else if (status === "SUKSES") {
-                tutupPreview();
-                alert("✅ BERHASIL!\nData lembaga sudah aman tersimpan di Google Sheet.");
-                
-                if (confirm("Cetak bukti laporan?")) { 
-                    const dataObj = {};
-                    formData.forEach((value, key) => { dataObj[key] = value; });
-                    cetakLengkap(dataObj); 
-                }
-                
-                form.reset(); 
-                document.getElementById('labelAwalan').innerText = "-";
-                window.scrollTo(0,0);
-                btnFix.disabled = false; 
-                btnFix.innerText = "Data Benar, Lanjut Kirim!";
-            } else {
-                // Jika Google kirim jawaban aneh (bukan DOBEL/SUKSES)
-                alert("Respon Server: " + status);
-                btnFix.disabled = false;
-            }
-        })
-        .catch(err => { 
-            alert("Aduh Bi, ada Error: " + err.message); 
-            btnFix.disabled = false; 
-            btnFix.innerText = "Coba Kirim Lagi";
-        });
-    }
+// kirim ke google sheet
+async function prosesKirimData() {
+  const btnFix = document.getElementById('btnKirimFix');
+  const npsnInput = document.getElementById('npsn').value;
+ 
+  btnFix.disabled = true;
+  btnFix.innerText = "Mengecek Database...";
+  try {
+      // 1. CEK NPSN DULU (Kirim mode=cek lewat POST)
+      const checkBody = new FormData();
+      checkBody.append('mode', 'cek');
+      checkBody.append('npsn', npsnInput);
+      const checkRes = await fetch(scriptURL, { 
+        method: 'POST',
+        mode: 'cors',  // Tambah ini: biar eksplisit cross-origin
+        redirect: 'follow',  // Tambah ini: ikuti redirect dari GAS
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },  // Tambah ini: pastiin type body benar
+        body: checkBody  // Body tetap FormData (GAS suka ini)
+      });
+      const hasilCek = await checkRes.text();
+      if (hasilCek.trim() === "ADA") {
+          const konfirmasi = confirm("⚠️ NPSN " + npsnInput + " sudah ada!\n\nOK = Timpa Data Lama\nCancel = Batal & Edit");
+          if (!konfirmasi) {
+              return; // Tombol akan hidup lagi karena blok 'finally' di bawah
+          }
+      }
+      // 2. PROSES SIMPAN/UPDATE
+      btnFix.innerText = "Menyimpan Data...";
+      const formData = new FormData(form);
+      const namaLengkap = document.getElementById('selectBentuk').value + " " + document.getElementById('namaLembaga').value;
+      formData.set('nama_lembaga', namaLengkap);
+      formData.append('mode', 'simpan'); // Beri tahu server ini mode simpan
+      const response = await fetch(scriptURL, { 
+        method: 'POST',
+        mode: 'cors',  // Tambah ini
+        redirect: 'follow',  // Tambah ini
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },  // Tambah ini
+        body: formData  // Body tetap FormData
+      });
+      const hasilFinal = await response.text();
+      if (hasilFinal.trim() === "SAVED" || hasilFinal.trim() === "UPDATED") {
+          alert("✅ Alhamdulillah! Data berhasil " + (hasilFinal.trim() === "SAVED" ? "disimpan." : "diperbarui."));
+          tutupPreview();
+         
+          // Simpan data untuk cetakan sebelum reset
+          window.dataArsipBaba = {};
+          formData.forEach((value, key) => { window.dataArsipBaba[key] = value; });
+         
+          form.reset();
+          document.getElementById('labelAwalan').innerText = "-";
+          window.scrollTo(0, 0);
+         
+          if (confirm("Cetak bukti laporan?")) {
+              cetakLengkap(window.dataArsipBaba);
+          }
+      } else {
+          alert("Respon Server: " + hasilFinal);
+      }
+  } catch (err) {
+      alert("Aduh Bi, Error Koneksi: " + err.message);
+  } finally {
+      // MAU BERHASIL ATAU ERROR, TOMBOL HARUS HIDUP LAGI BIAR GAK MACET
+      btnFix.disabled = false;
+      btnFix.innerText = "Data Benar, Lanjut Kirim!";
+  }
+}
 
     // Fungsi buat nutup modal dan langsung cetak bi
     function tutupSuksesDanCetak() {
@@ -885,5 +896,4 @@ for(let i=11; i<=22; i++) {
 </script>
 
 </body>
-
 </html>
